@@ -15,4 +15,24 @@ app.use(express.static("public"))
 app.use(cookieParser())
 
 
+
+// routes import
+import userRouter from "./routes/user.routes.js"
+import {upload} from "./middlewares/multer.middleware.js"
+
+// routes decleration 
+app.use("/api/v1/users",
+    upload.fields([
+        {
+            name: "avatar",
+            maxCount: 1
+        },
+        {
+            name: "coverImage",
+            maxCount: 1
+        }
+    ]),
+    userRouter
+)
+
 export default app;

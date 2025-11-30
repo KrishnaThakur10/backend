@@ -12,7 +12,7 @@ const userSchema = new Schema(
             trim: true,
             index: true
         },
-        username:{
+        email:{
             type: String,
             required: true, 
             unique: true,
@@ -54,9 +54,9 @@ const userSchema = new Schema(
 
 
 // saving the password only when the password is save or updated  
-userSchema.pre("save", async function(){
+userSchema.pre("save", async function(next){
     if(this.isModified("password")){
-        this.password = bcrypt.hash(this.password, 10)
+        this.password = await bcrypt.hash(this.password, 10)
         next()
     }
 })
