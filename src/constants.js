@@ -1,1 +1,1 @@
-export const DB_NAME = "well"
+export const DB_NAME = "black hole"
