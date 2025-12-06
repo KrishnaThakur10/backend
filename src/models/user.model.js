@@ -55,10 +55,10 @@ const userSchema = new Schema(
 
 // saving the password only when the password is save or updated  
 userSchema.pre("save", async function(next){
-    if(this.isModified("password")){
-        this.password = await bcrypt.hash(this.password, 10)
-        next()
-    }
+    if(!this.isModified("password")) return next();
+    
+    this.password = await bcrypt.hash(this.password, 10)
+    next()
 })
 
 
