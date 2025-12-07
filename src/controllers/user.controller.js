@@ -1,9 +1,10 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { User } from "../models/user.model.js";
-import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import { uploadOnCloudinary, deleteOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 const generateAccessAndRefreshToken = async (userId) => {
   try {
@@ -265,14 +266,22 @@ const updatedUserAvatar = asyncHandler(async (req, res) => {
   if (!avatarLocalPath) {
     throw new ApiError(400, "Avatar file is missing");
   }
+  const tempUser = await User.findById(req.user?._id).select("avatar")
 
+  if(tempUser.avatar){
+    const publicId = tempUser.avatar.split('/').pop().split('.')[0]
+    if(publicId){
+      await deleteOnCloudinary(publicId)
+    }
+  }
+  
   const avatar = await uploadOnCloudinary(avatarLocalPath);
   if (!avatar.url) {
     throw new ApiError(400, "Error while uploading Avatar");
   }
-
+  
   const user = await User.findByIdAndUpdate(
-    req.user?.id,
+    req.user?._id,
     {
       $set: {
         avatar: avatar.url,
@@ -280,26 +289,34 @@ const updatedUserAvatar = asyncHandler(async (req, res) => {
     },
     { new: true }
   ).select("-password");
-
+  
   return res
-    .status(200)
-    .json(new ApiResponse(200, user, "Avatar is updated successfully"));
+  .status(200)
+  .json(new ApiResponse(200, user, "Avatar is updated successfully"));
 });
 
 const updatedUserCoverImage = asyncHandler(async (req, res) => {
   const coverImageLocalPath = req.file?.path;
-
+  
   if (!coverImageLocalPath) {
     throw new ApiError(400, "Cover Image file is missing");
   }
-
+  
+  const tempUser = await User.findById(req.user?._id).select("coverImage")
+  
+  if(tempUser?.coverImage){
+    const publicId = tempUser.coverImage.split('/').pop().split('.')[0]
+    if(publicId){
+      await deleteOnCloudinary(publicId)
+    }
+  }
   const coverImage = await uploadOnCloudinary(coverImageLocalPath);
   if (!coverImage.url) {
     throw new ApiError(400, "Error while uploading Cover Image");
   }
 
   const user = await User.findByIdAndUpdate(
-    req.user?.id,
+    req.user?._id,
     {
       $set: {
         coverImage: coverImage.url,
@@ -312,6 +329,126 @@ const updatedUserCoverImage = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, user, "Cover Image is updated successfully"));
 });
+
+const getUserChannelProfile = asyncHandler(async(req, res)=>{
+  const {username} = req.params
+
+  if(!username){
+    throw new ApiError(400, "username is missing")
+  }
+
+  const channel = await  User.aggregate([
+    {
+      $match: {
+         username : username?.toLowerCase()
+      }
+    },
+    {
+      $lookup:{
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "channel", // as we are seleting the channels so we will get all the subscribers 
+        as: "subscribers" // an array for all subscribers of my channel
+      }
+    },
+    {
+      $lookup:{
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "subscriber", // as we are seleting the subscriber so we will get how many i have subscribed  
+        as: "subscribedTo" // an array of all channels that i have subscribed to 
+      }
+    },
+    {
+      $addFields:{ // addFields add more field in the models containing others also
+        subscribersCount:{
+          $size: "$subscribers"  // size help to count all the documents 
+        },
+        channelsSubscribedToCount:{
+          $size: "$subscribedTo"
+        },
+        isSubscribed:{ // we just need to check myself : do i exist in subscribers (y ? not show to subscribe : show to subscribe )
+          $cond:{
+            if:{$in: [req.user?._id, "$subscribers.subscriber"]},
+            then: true,
+            else: false
+          }
+        }
+      }
+    },
+    {
+      $project:{
+        fullName: 1,
+        username: 1,
+        subscribersCount: 1,
+        channelsSubscribedToCount: 1,
+        isSubscribed: 1,
+        avatar: 1,
+        coverImage: 1,
+        email: 1, 
+      }
+    }
+  ])
+
+  if(!channel?.length){
+    throw new ApiError(404, "channel does not exists")
+  }
+
+  return res
+  .status(200)
+  .json(new ApiResponse(200, channel[0], "User channel fetched successfully"))
+});
+
+const getWatchHistory = asyncHandler(async(req, res)=>{
+  const user = await User.aggregate([
+    {
+      $match:{
+        _id: new mongoose.Types.ObjectId(req.user._id)  // we cannot send directly req.user._id because in db it is stored ObjectId('String') and if we pass req.user._id it will only pass string becasue in aggregate mongoose not convert string to ObjectId('String') so we need to pass this from our end in this format 
+      }
+    },
+    {
+      $lookup:{
+        from: "videos",
+        localField: "watchHistory",
+        foreignField: "_id",  // video model ki id
+        as: "watchHistory",
+        pipeline:[
+          {
+            $lookup:{
+              from: "users",
+              localField: "owner",
+              foreignField: "_id",
+              as: "owner",
+              pipeline: [
+                {
+                  $project:{
+                    fullName: 1,
+                    username: 1, 
+                    avatar: 1
+                  }
+                }
+              ]
+            }
+          },
+          {
+            $addFields:{
+              owner:{
+                $first: "$owner"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ])
+
+  return res
+  .status(200)
+  .json(
+    new ApiResponse(200, user[0].watchHistory, "Watch history fetched successfully")
+  )
+})
+
 export {
   registerUser,
   loginUser,
@@ -322,4 +459,6 @@ export {
   updateAccountDetails,
   updatedUserAvatar,
   updatedUserCoverImage,
+  getUserChannelProfile,
+  getWatchHistory
 };
